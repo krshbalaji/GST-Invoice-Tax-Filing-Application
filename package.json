@@ -1,0 +1,10 @@
+{
+  "name": "gst-invoice-platform",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "install:all": "pip3 install --break-system-packages -r backend/requirements.txt && npm install --prefix frontend",
+    "dev": "node start.js",
+    "start": "node start.js"
+  }
+}
