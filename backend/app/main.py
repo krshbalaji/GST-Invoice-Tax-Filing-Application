@@ -91,6 +91,16 @@ def gstin_of(db: Session, user, gstin_id: int) -> models.Gstin:
     return g
 
 
+def assert_period_open(db: Session, gstin_id: int, invoice_date: date):
+    period = period_of(invoice_date)
+    row = db.query(models.ReturnPeriod).filter(
+        models.ReturnPeriod.gstin_id == gstin_id,
+        models.ReturnPeriod.period == period,
+    ).first()
+    if row and row.locked:
+        raise HTTPException(400, "Period is locked")
+
+
 def next_number(gstin: models.Gstin, invoice_type: str) -> str:
     mapping = {
         "TAX_INVOICE": ("invoice_prefix", "next_number"),
@@ -491,6 +501,7 @@ def update_item(item_id: int, body: schemas.ItemIn, user=Depends(current_user), 
 def preview_invoice(body: schemas.InvoiceIn, user=Depends(current_user), db: Session = Depends(get_db)):
     company = company_of(db, user)
     gstin = gstin_of(db, user, body.gstin_id)
+    assert_period_open(db, gstin.id, body.invoice_date)
     party = db.get(models.Party, body.party_id) if body.party_id else None
     party_state = ""
     party_gstin = ""
@@ -589,6 +600,7 @@ def create_invoice(body: schemas.InvoiceIn, user=Depends(current_user), db: Sess
     party = db.get(models.Party, body.party_id) if body.party_id else None
     if body.party_id and (not party or party.company_id != cid(user)):
         raise HTTPException(400, "Customer not found")
+    assert_period_open(db, gstin.id, body.invoice_date)
     inv_type = body.invoice_type
     preset = preset_by_code(body.gst_preset)
     if company.scheme == "COMPOSITION" or preset.get("composition"):
@@ -670,6 +682,7 @@ def duplicate_invoice(invoice_id: int, user=Depends(current_user), db: Session =
     company = company_of(db, user)
     gstin = src.gstin
     today = date.today()
+    assert_period_open(db, src.gstin_id, today)
     inv = models.Invoice(
         company_id=cid(user),
         gstin_id=src.gstin_id,
@@ -740,6 +753,7 @@ def credit_note_from(invoice_id: int, user=Depends(current_user), db: Session = 
     company = company_of(db, user)
     gstin = src.gstin
     today = date.today()
+    assert_period_open(db, src.gstin_id, today)
     inv = models.Invoice(
         company_id=cid(user),
         gstin_id=src.gstin_id,
