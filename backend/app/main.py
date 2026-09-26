@@ -922,9 +922,18 @@ def cancel_irn(invoice_id: int, user=Depends(current_user), db: Session = Depend
         raise HTTPException(400, "No IRN to cancel")
     if inv.irn_date and datetime.utcnow() - inv.irn_date > timedelta(hours=24):
         raise HTTPException(400, "IRN can be cancelled only within 24 hours")
-    inv.einvoice_status = "CANCELLED"
+    old_irn = inv.irn
+    audit(db, user, "IRN_CANCEL", "INVOICE", inv.id, old_irn)
+    inv.irn = ""
+    inv.ack_no = ""
+    inv.irn_date = None
+    inv.signed_qr = ""
     inv.cancel_reason = "IRN cancelled in sandbox"
-    audit(db, user, "IRN_CANCEL", "INVOICE", inv.id, inv.irn)
+    company = company_of(db, user)
+    if einvoice_required(inv.party_gstin, company.aato, inv.invoice_type, inv.scheme):
+        inv.einvoice_status = "REQUIRED"
+    else:
+        inv.einvoice_status = "NOT_REQUIRED"
     db.commit()
     return {"ok": True}
 
