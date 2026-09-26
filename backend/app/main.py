@@ -969,6 +969,8 @@ def create_purchase(body: schemas.PurchaseIn, user=Depends(current_user), db: Se
         raise HTTPException(403, "Insufficient permissions")
     gstin = gstin_of(db, user, body.gstin_id)
     vendor = db.get(models.Party, body.vendor_id) if body.vendor_id else None
+    if body.vendor_id and (not vendor or vendor.company_id != cid(user)):
+        raise HTTPException(400, "Vendor not found")
     pos = body.place_of_supply or (vendor.place_of_supply if vendor else gstin.state_code)
     row = models.Purchase(
         company_id=cid(user),
