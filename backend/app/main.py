@@ -643,6 +643,7 @@ def update_invoice(invoice_id: int, body: schemas.InvoiceIn, user=Depends(curren
         raise HTTPException(400, "Cannot edit invoice after IRN generation")
     company = company_of(db, user)
     gstin = gstin_of(db, user, body.gstin_id)
+    assert_period_open(db, gstin.id, body.invoice_date)
     party = db.get(models.Party, body.party_id) if body.party_id else None
     inv.gstin_id = gstin.id
     inv.invoice_type = body.invoice_type
