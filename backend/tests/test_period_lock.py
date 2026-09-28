@@ -493,3 +493,42 @@ def test_password_hash_verification():
     assert hashed != password
     assert verify_password(password, hashed) is True
     assert verify_password("WrongPassword!", hashed) is False
+
+def test_login_valid_and_invalid_credentials():
+    db = _session()
+    user, company, _ = _setup(db)
+
+    from app.main import login
+    from app import schemas
+
+    result = login(
+        schemas.LoginIn(email=user.email, password="Owner@123"),
+        db=db,
+    )
+
+    assert result["token"]
+    assert result["user"]["id"] == user.id
+    assert result["user"]["email"] == user.email
+    assert result["user"]["company_id"] == company.id
+    assert "password_hash" not in result["user"]
+    assert result["company"]["id"] == company.id
+
+    try:
+        login(
+            schemas.LoginIn(email=user.email, password="WrongPassword!"),
+            db=db,
+        )
+        assert False, "Wrong password must be rejected"
+    except HTTPException as exc:
+        assert exc.status_code == 401
+        assert exc.detail == "Invalid email or password"
+
+    try:
+        login(
+            schemas.LoginIn(email="missing@example.com", password="Owner@123"),
+            db=db,
+        )
+        assert False, "Unknown email must be rejected"
+    except HTTPException as exc:
+        assert exc.status_code == 401
+        assert exc.detail == "Invalid email or password"
