@@ -532,3 +532,50 @@ def test_login_valid_and_invalid_credentials():
     except HTTPException as exc:
         assert exc.status_code == 401
         assert exc.detail == "Invalid email or password"
+
+def test_gstin_creation_role_boundary():
+    db = _session()
+    user, _, _ = _setup(db)
+
+    from app.main import create_gstin
+    from app import schemas
+
+    body = schemas.GstinIn(
+        gstin="27AABCA1234C2ZE",
+        legal_name="Second GSTIN",
+        trade_name="Second",
+        address1="2 Main",
+        city="Mumbai",
+        state_code="27",
+        pincode="400001",
+    )
+
+    # ACCOUNTANT is explicitly allowed.
+    user.role = "ACCOUNTANT"
+    db.commit()
+
+    result = create_gstin(body, user=user, db=db)
+    assert result["gstin"] == body.gstin
+
+    # VIEWER is explicitly rejected.
+    user.role = "VIEWER"
+    db.commit()
+
+    try:
+        create_gstin(
+            schemas.GstinIn(
+                gstin="29AABCA1234C3ZF",
+                legal_name="Third GSTIN",
+                trade_name="Third",
+                address1="3 Main",
+                city="Bengaluru",
+                state_code="29",
+                pincode="560001",
+            ),
+            user=user,
+            db=db,
+        )
+        assert False, "VIEWER must not create GSTIN"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Insufficient permissions"
