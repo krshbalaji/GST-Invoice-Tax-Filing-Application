@@ -382,3 +382,39 @@ def test_non_owner_cannot_create_user():
         assert exc.detail == "Only owner can add users"
 
     assert db.query(models.User).filter(models.User.email == "blocked@test.example").count() == 0
+
+def test_gstin_of_rejects_gstin_from_another_company():
+    db = _session()
+    user, _, _ = _setup(db)
+
+    company_b = models.Company(
+        legal_name="Other Co",
+        trade_name="Other",
+        pan="AABCB5678D",
+        scheme="REGULAR",
+        aato=1_00_00_000,
+    )
+    db.add(company_b)
+    db.flush()
+
+    foreign_gstin = models.Gstin(
+        company_id=company_b.id,
+        gstin="27AABCB5678D1Z5",
+        legal_name="Other Co",
+        trade_name="Other",
+        address1="1 Other Street",
+        city="Mumbai",
+        state_code="27",
+        pincode="400001",
+    )
+    db.add(foreign_gstin)
+    db.commit()
+
+    from app.main import gstin_of
+
+    try:
+        gstin_of(db, user, foreign_gstin.id)
+        assert False, "Cross-company GSTIN must be rejected"
+    except HTTPException as exc:
+        assert exc.status_code == 404
+        assert exc.detail == "GSTIN not found"
