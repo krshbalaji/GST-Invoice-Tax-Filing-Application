@@ -358,3 +358,27 @@ def test_locked_credit_note_rejects():
 
     assert db.query(models.Invoice).count() == count_before
     assert db.query(models.Invoice).filter(models.Invoice.invoice_type == "CREDIT_NOTE").count() == 0
+
+def test_non_owner_cannot_create_user():
+    db = _session()
+    user, _, _ = _setup(db)
+    user.role = "ACCOUNTANT"
+    db.commit()
+
+    body = schemas.UserIn(
+        name="Blocked User",
+        email="blocked@test.example",
+        password="Blocked@123",
+        role="VIEWER",
+    )
+
+    from app.main import create_user
+
+    try:
+        create_user(body, user=user, db=db)
+        assert False, "Non-owner must not create users"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Only owner can add users"
+
+    assert db.query(models.User).filter(models.User.email == "blocked@test.example").count() == 0
