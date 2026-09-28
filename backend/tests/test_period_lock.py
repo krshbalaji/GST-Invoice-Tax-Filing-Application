@@ -483,3 +483,13 @@ def test_current_user_rejects_missing_invalid_expired_and_inactive_tokens():
     except HTTPException as exc:
         assert exc.status_code == 401
         assert exc.detail == "User not found"
+
+def test_password_hash_verification():
+    from app.security import hash_password, verify_password
+
+    password = "Owner@123"
+    hashed = hash_password(password)
+
+    assert hashed != password
+    assert verify_password(password, hashed) is True
+    assert verify_password("WrongPassword!", hashed) is False
