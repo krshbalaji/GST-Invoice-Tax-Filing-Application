@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import create_engine, event
@@ -432,3 +432,54 @@ def test_user_out_does_not_expose_password_hash():
     assert output["company_id"] == user.company_id
     assert "password_hash" not in output
     assert "password" not in output
+
+def test_current_user_rejects_missing_invalid_expired_and_inactive_tokens():
+    db = _session()
+    user, _, _ = _setup(db)
+
+    from app.security import SECRET, current_user, create_token
+    from jose import jwt
+
+    try:
+        current_user(authorization=None, token=None, db=db)
+        assert False, "Missing token must be rejected"
+    except HTTPException as exc:
+        assert exc.status_code == 401
+        assert exc.detail == "Not authenticated"
+
+    try:
+        current_user(authorization="Bearer invalid-token", token=None, db=db)
+        assert False, "Invalid token must be rejected"
+    except HTTPException as exc:
+        assert exc.status_code == 401
+        assert exc.detail == "Invalid or expired token"
+
+    expired = jwt.encode(
+        {
+            "sub": str(user.id),
+            "cid": user.company_id,
+            "role": user.role,
+            "exp": datetime.utcnow() - timedelta(minutes=1),
+        },
+        SECRET,
+        algorithm="HS256",
+    )
+    try:
+        current_user(authorization=f"Bearer {expired}", token=None, db=db)
+        assert False, "Expired token must be rejected"
+    except HTTPException as exc:
+        assert exc.status_code == 401
+        assert exc.detail == "Invalid or expired token"
+
+    valid = create_token(user)
+    assert current_user(authorization=f"Bearer {valid}", token=None, db=db).id == user.id
+
+    user.active = False
+    db.commit()
+
+    try:
+        current_user(authorization=f"Bearer {valid}", token=None, db=db)
+        assert False, "Inactive user must be rejected"
+    except HTTPException as exc:
+        assert exc.status_code == 401
+        assert exc.detail == "User not found"
