@@ -418,3 +418,17 @@ def test_gstin_of_rejects_gstin_from_another_company():
     except HTTPException as exc:
         assert exc.status_code == 404
         assert exc.detail == "GSTIN not found"
+
+def test_user_out_does_not_expose_password_hash():
+    db = _session()
+    user, _, _ = _setup(db)
+
+    from app.serialize import user_out
+
+    output = user_out(user)
+
+    assert output["id"] == user.id
+    assert output["email"] == user.email
+    assert output["company_id"] == user.company_id
+    assert "password_hash" not in output
+    assert "password" not in output
