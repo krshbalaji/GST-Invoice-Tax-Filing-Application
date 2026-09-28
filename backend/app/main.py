@@ -503,6 +503,8 @@ def preview_invoice(body: schemas.InvoiceIn, user=Depends(current_user), db: Ses
     gstin = gstin_of(db, user, body.gstin_id)
     assert_period_open(db, gstin.id, body.invoice_date)
     party = db.get(models.Party, body.party_id) if body.party_id else None
+    if body.party_id and (not party or party.company_id != cid(user)):
+        raise HTTPException(400, "Customer not found")
     party_state = ""
     party_gstin = ""
     if party and party.company_id == cid(user):
@@ -519,6 +521,8 @@ def preview_invoice(body: schemas.InvoiceIn, user=Depends(current_user), db: Ses
         rate, desc, hsn, unit = ln.rate, ln.description, ln.hsn_sac, ln.unit
         if ln.item_id and not ln.custom:
             item = db.get(models.Item, ln.item_id)
+            if not item or item.company_id != cid(user):
+                raise HTTPException(400, "Catalog item not found")
             if item:
                 rate, desc, hsn, unit = item.rate, item.description, item.hsn_sac, item.unit
         raw.append({"qty": ln.qty, "rate": rate, "discount": ln.discount or 0, "description": desc, "hsn_sac": hsn, "unit": unit})
@@ -645,6 +649,8 @@ def update_invoice(invoice_id: int, body: schemas.InvoiceIn, user=Depends(curren
     gstin = gstin_of(db, user, body.gstin_id)
     assert_period_open(db, gstin.id, body.invoice_date)
     party = db.get(models.Party, body.party_id) if body.party_id else None
+    if body.party_id and (not party or party.company_id != cid(user)):
+        raise HTTPException(400, "Customer not found")
     inv.gstin_id = gstin.id
     inv.invoice_type = body.invoice_type
     fill_party(inv, party)

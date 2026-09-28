@@ -6,9 +6,16 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 from app import models, schemas
-from app.main import create_invoice, update_invoice, duplicate_invoice, credit_note_from
+from app.main import (
+    create_invoice,
+    update_invoice,
+    preview_invoice,
+    duplicate_invoice,
+    credit_note_from,
+)
 from app.security import hash_password
 from app.gst_engine import period_of
+
 
 
 def _session():
@@ -119,6 +126,142 @@ def _assert_locked(exc):
     assert exc.status_code == 400
     assert exc.detail == "Period is locked"
 
+def test_preview_rejects_customer_from_another_company():
+    db = _session()
+    user, gstin, _ = _setup(db)
+
+    company_b = models.Company(
+        legal_name="Other Co",
+        trade_name="Other",
+        pan="AABCB5678D",
+        scheme="REGULAR",
+        aato=1_00_00_000,
+    )
+    db.add(company_b)
+    db.flush()
+
+    foreign_party = models.Party(
+        company_id=company_b.id,
+        kind="CUSTOMER",
+        name="Foreign Customer",
+        gstin="27AABCB5678D1Z5",
+        state_code="27",
+        place_of_supply="27",
+        city="Mumbai",
+        pincode="400001",
+        address1="1 Other Street",
+    )
+    db.add(foreign_party)
+    db.commit()
+
+    body = _invoice_body(gstin.id, foreign_party.id, date(2026, 4, 10))
+
+    try:
+        preview_invoice(body, user=user, db=db)
+        assert False, "Cross-company customer must be rejected"
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert exc.detail == "Customer not found"
+
+
+def test_preview_rejects_catalog_item_from_another_company():
+    db = _session()
+    user, gstin, _ = _setup(db)
+
+    company_b = models.Company(
+        legal_name="Other Co",
+        trade_name="Other",
+        pan="AABCB5678D",
+        scheme="REGULAR",
+        aato=1_00_00_000,
+    )
+    db.add(company_b)
+    db.flush()
+
+    foreign_item = models.Item(
+        company_id=company_b.id,
+        kind="SERVICE",
+        code="FOREIGN-001",
+        description="Foreign Item",
+        hsn_sac="998599",
+        unit="NOS",
+        rate=9999,
+        taxability="TAXABLE",
+        gst_preset="REG_18",
+    )
+    db.add(foreign_item)
+    db.commit()
+
+    body = _invoice_body(gstin.id, None, date(2026, 4, 10))
+    body.lines[0].custom = False
+    body.lines[0].item_id = foreign_item.id
+    body.lines[0].description = ""
+    body.lines[0].hsn_sac = ""
+    body.lines[0].unit = "NOS"
+    body.lines[0].rate = 0
+
+    try:
+        preview_invoice(body, user=user, db=db)
+        assert False, "Cross-company catalog item must be rejected"
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert exc.detail == "Catalog item not found"
+
+
+def test_update_rejects_customer_from_another_company():
+    db = _session()
+    user, gstin, party = _setup(db)
+    inv_date = date(2026, 4, 10)
+
+    out = create_invoice(
+        _invoice_body(gstin.id, party.id, inv_date),
+        user=user,
+        db=db,
+    )
+    invoice_id = out["id"]
+
+    company_b = models.Company(
+        legal_name="Other Co",
+        trade_name="Other",
+        pan="AABCB5678D",
+        scheme="REGULAR",
+        aato=1_00_00_000,
+    )
+    db.add(company_b)
+    db.flush()
+
+    foreign_party = models.Party(
+        company_id=company_b.id,
+        kind="CUSTOMER",
+        name="Foreign Customer",
+        gstin="27AABCB5678D1Z5",
+        state_code="27",
+        place_of_supply="27",
+        city="Mumbai",
+        pincode="400001",
+        address1="1 Other Street",
+    )
+    db.add(foreign_party)
+    db.commit()
+
+    body = _invoice_body(gstin.id, foreign_party.id, inv_date)
+
+    try:
+        update_invoice(
+            invoice_id,
+            body,
+            user=user,
+            db=db,
+        )
+        assert False, "Cross-company customer must be rejected"
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert exc.detail == "Customer not found"
+
+    db.expire_all()
+    inv = db.get(models.Invoice, invoice_id)
+    assert inv.party_id == party.id
+    assert inv.party_name == party.name
 
 def test_locked_create_rejects():
     db = _session()
