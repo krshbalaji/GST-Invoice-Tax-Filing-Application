@@ -1025,3 +1025,83 @@ def test_item_creation_role_boundary():
         models.Item.company_id == user.company_id,
         models.Item.description == "Viewer Service",
     ).count() == 0
+
+
+
+def test_return_period_lock_role_boundary():
+    db = _session()
+    user, gstin, _ = _setup(db)
+
+    from app.main import lock_period
+
+    user.role = "ACCOUNTANT"
+    db.commit()
+
+    result = lock_period(
+        gstin.id,
+        "042026",
+        "GSTR1",
+        user=user,
+        db=db,
+    )
+
+    assert result["ok"] is True
+
+    db.expire_all()
+    row = db.query(models.ReturnPeriod).filter(
+        models.ReturnPeriod.gstin_id == gstin.id,
+        models.ReturnPeriod.period == "042026",
+    ).one()
+
+    assert row.locked is True
+    assert row.gstr1_status == "FILED"
+    assert row.gstr3b_status == "OPEN"
+
+    user.role = "CA"
+    db.commit()
+
+    result = lock_period(
+        gstin.id,
+        "052026",
+        "GSTR1",
+        user=user,
+        db=db,
+    )
+
+    assert result["ok"] is True
+
+    db.expire_all()
+    row = db.query(models.ReturnPeriod).filter(
+        models.ReturnPeriod.gstin_id == gstin.id,
+        models.ReturnPeriod.period == "052026",
+    ).one()
+
+    assert row.locked is True
+    assert row.gstr1_status == "FILED"
+    assert row.gstr3b_status == "OPEN"
+
+    user.role = "VIEWER"
+    db.commit()
+
+    try:
+        lock_period(
+            gstin.id,
+            "042026",
+            "GSTR3B",
+            user=user,
+            db=db,
+        )
+        assert False, "VIEWER must not lock return periods"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Insufficient permissions"
+
+    db.expire_all()
+    row = db.query(models.ReturnPeriod).filter(
+        models.ReturnPeriod.gstin_id == gstin.id,
+        models.ReturnPeriod.period == "042026",
+    ).one()
+
+    assert row.locked is True
+    assert row.gstr1_status == "FILED"
+    assert row.gstr3b_status == "OPEN"
