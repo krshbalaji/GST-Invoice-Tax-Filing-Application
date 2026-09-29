@@ -607,3 +607,44 @@ def test_company_update_role_boundary():
         assert exc.detail == "Insufficient permissions"
 
     assert db.get(models.Company, user.company_id).trade_name == "Updated Trade"
+
+def test_party_creation_role_boundary():
+    db = _session()
+    user, _, _ = _setup(db)
+
+    from app.main import create_party
+
+    body = schemas.PartyIn(
+        kind="CUSTOMER",
+        name="Accountant Customer",
+        state_code="29",
+        city="Bengaluru",
+    )
+
+    user.role = "ACCOUNTANT"
+    db.commit()
+
+    result = create_party(body, user=user, db=db)
+    assert result["name"] == "Accountant Customer"
+
+    user.role = "VIEWER"
+    db.commit()
+
+    blocked = schemas.PartyIn(
+        kind="CUSTOMER",
+        name="Viewer Customer",
+        state_code="29",
+        city="Bengaluru",
+    )
+
+    try:
+        create_party(blocked, user=user, db=db)
+        assert False, "VIEWER must not create parties"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Insufficient permissions"
+
+    assert db.query(models.Party).filter(
+        models.Party.company_id == user.company_id,
+        models.Party.name == "Viewer Customer",
+    ).count() == 0
