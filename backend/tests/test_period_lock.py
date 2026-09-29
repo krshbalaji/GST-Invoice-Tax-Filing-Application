@@ -370,6 +370,53 @@ def test_irn_cancellation_role_boundary():
     assert inv.irn == "TEST-IRN-002"
     assert inv.ack_no == "ACK-002"
 
+def test_irn_generation_role_boundary():
+    db = _session()
+    user, gstin, party = _setup(db)
+    inv_date = date(2026, 4, 10)
+
+    from app.main import create_invoice, generate_irn
+
+    user.role = "ACCOUNTANT"
+    db.commit()
+
+    invoice = create_invoice(
+        _invoice_body(gstin.id, party.id, inv_date),
+        user=user,
+        db=db,
+    )
+    invoice_id = invoice["id"]
+
+    result = generate_irn(
+        invoice_id,
+        user=user,
+        db=db,
+    )
+
+    assert result["ok"] is True
+    assert result["sandbox"] is True
+    assert result["irn"]
+    assert result["ack_no"]
+
+    db.expire_all()
+    inv = db.get(models.Invoice, invoice_id)
+
+    assert inv.irn == result["irn"]
+    assert inv.ack_no == result["ack_no"]
+    assert inv.irn_date is not None
+    assert inv.signed_qr
+    assert inv.einvoice_status == "GENERATED"
+
+    user.role = "VIEWER"
+    db.commit()
+
+    try:
+        generate_irn(invoice_id, user=user, db=db)
+        assert False, "VIEWER must not generate IRNs"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Insufficient permissions"
+
 def test_invoice_mutation_role_boundaries():
     db = _session()
     user, gstin, party = _setup(db)
