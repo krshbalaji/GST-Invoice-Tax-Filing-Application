@@ -648,3 +648,46 @@ def test_party_creation_role_boundary():
         models.Party.company_id == user.company_id,
         models.Party.name == "Viewer Customer",
     ).count() == 0
+
+def test_item_creation_role_boundary():
+    db = _session()
+    user, _, _ = _setup(db)
+
+    from app.main import create_item
+
+    body = schemas.ItemIn(
+        kind="SERVICE",
+        description="Accountant Service",
+        hsn_sac="9983",
+        unit="NOS",
+        rate=1000,
+    )
+
+    user.role = "ACCOUNTANT"
+    db.commit()
+
+    result = create_item(body, user=user, db=db)
+    assert result["description"] == "Accountant Service"
+
+    user.role = "VIEWER"
+    db.commit()
+
+    blocked = schemas.ItemIn(
+        kind="SERVICE",
+        description="Viewer Service",
+        hsn_sac="9983",
+        unit="NOS",
+        rate=500,
+    )
+
+    try:
+        create_item(blocked, user=user, db=db)
+        assert False, "VIEWER must not create items"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Insufficient permissions"
+
+    assert db.query(models.Item).filter(
+        models.Item.company_id == user.company_id,
+        models.Item.description == "Viewer Service",
+    ).count() == 0
