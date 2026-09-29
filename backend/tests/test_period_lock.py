@@ -717,6 +717,32 @@ def test_non_owner_cannot_create_user():
 
     assert db.query(models.User).filter(models.User.email == "blocked@test.example").count() == 0
 
+def test_owner_can_create_user():
+    db = _session()
+    user, _, _ = _setup(db)
+
+    body = schemas.UserIn(
+        name="Created User",
+        email="created@test.example",
+        password="Created@123",
+        role="VIEWER",
+    )
+
+    from app.main import create_user
+
+    result = create_user(body, user=user, db=db)
+
+    assert result["email"] == "created@test.example"
+    assert result["role"] == "VIEWER"
+
+    created = db.query(models.User).filter(
+        models.User.email == "created@test.example"
+    ).one()
+
+    assert created.company_id == user.company_id
+    assert created.role == "VIEWER"
+    assert created.password_hash != "Created@123"
+
 def test_gstin_of_rejects_gstin_from_another_company():
     db = _session()
     user, _, _ = _setup(db)
