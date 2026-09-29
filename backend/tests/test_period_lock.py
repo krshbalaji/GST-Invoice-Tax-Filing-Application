@@ -12,6 +12,7 @@ from app.main import (
     preview_invoice,
     duplicate_invoice,
     credit_note_from,
+    cancel_invoice,
 )
 from app.security import hash_password
 from app.gst_engine import period_of
@@ -305,6 +306,62 @@ def test_purchase_creation_role_boundary():
         models.Purchase.company_id == user.company_id,
         models.Purchase.number == "PUR-002",
     ).count() == 0
+
+def test_invoice_mutation_role_boundaries():
+    db = _session()
+    user, gstin, party = _setup(db)
+    inv_date = date(2026, 4, 10)
+
+    out = create_invoice(
+        _invoice_body(gstin.id, party.id, inv_date),
+        user=user,
+        db=db,
+    )
+    invoice_id = out["id"]
+
+    user.role = "VIEWER"
+    db.commit()
+
+    # VIEWER must not update an invoice.
+    try:
+        update_invoice(
+            invoice_id,
+            _invoice_body(gstin.id, party.id, inv_date),
+            user=user,
+            db=db,
+        )
+        assert False, "VIEWER must not update invoices"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Insufficient permissions"
+
+    # VIEWER must not cancel an invoice.
+    try:
+        cancel_invoice(invoice_id, user=user, db=db)
+        assert False, "VIEWER must not cancel invoices"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Insufficient permissions"
+
+    # VIEWER must not duplicate an invoice.
+    try:
+        duplicate_invoice(invoice_id, user=user, db=db)
+        assert False, "VIEWER must not duplicate invoices"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Insufficient permissions"
+
+    # VIEWER must not create a credit note.
+    try:
+        credit_note_from(invoice_id, user=user, db=db)
+        assert False, "VIEWER must not create credit notes"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Insufficient permissions"
+
+    db.expire_all()
+    inv = db.get(models.Invoice, invoice_id)
+    assert inv.status == "ISSUED"
 
 def test_locked_create_rejects():
     db = _session()
