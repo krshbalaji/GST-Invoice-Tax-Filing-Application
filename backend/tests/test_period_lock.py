@@ -702,6 +702,57 @@ def test_gstin_update_role_boundary():
     assert row.city == "Mysuru"
     assert row.pincode == "570001"
 
+def test_gst_preset_apply_role_boundary():
+    db = _session()
+    user, gstin, party = _setup(db)
+
+    from app.main import apply_preset, create_invoice
+
+    inv_date = date(2026, 4, 10)
+
+    # Create an editable invoice as ACCOUNTANT.
+    user.role = "ACCOUNTANT"
+    db.commit()
+
+    invoice = create_invoice(
+        _invoice_body(gstin.id, party.id, inv_date),
+        user=user,
+        db=db,
+    )
+    invoice_id = invoice["id"]
+
+    # ACCOUNTANT may apply a GST preset.
+    result = apply_preset(
+        code="REG_18",
+        user=user,
+        db=db,
+    )
+
+    assert result["updated"] >= 1
+
+    db.expire_all()
+    row = db.get(models.Invoice, invoice_id)
+    assert row.gst_preset == "REG_18"
+
+    # VIEWER must not apply a GST preset.
+    user.role = "VIEWER"
+    db.commit()
+
+    try:
+        apply_preset(
+            code="REG_5",
+            user=user,
+            db=db,
+        )
+        assert False, "VIEWER must not apply GST presets"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Insufficient permissions"
+
+    db.expire_all()
+    row = db.get(models.Invoice, invoice_id)
+    assert row.gst_preset == "REG_18"
+
 def test_user_out_does_not_expose_password_hash():
     db = _session()
     user, _, _ = _setup(db)
