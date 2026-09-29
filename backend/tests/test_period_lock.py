@@ -363,6 +363,130 @@ def test_invoice_mutation_role_boundaries():
     inv = db.get(models.Invoice, invoice_id)
     assert inv.status == "ISSUED"
 
+def test_party_and_item_update_role_boundaries():
+    db = _session()
+    user, _, _ = _setup(db)
+
+    from app.main import create_party, update_party, create_item, update_item
+
+    # ACCOUNTANT may update party.
+    user.role = "ACCOUNTANT"
+    db.commit()
+
+    party = create_party(
+        schemas.PartyIn(
+            kind="CUSTOMER",
+            name="Original Customer",
+            state_code="29",
+            city="Bengaluru",
+        ),
+        user=user,
+        db=db,
+    )
+
+    party_id = party["id"]
+
+    updated_party = update_party(
+        party_id,
+        schemas.PartyIn(
+            kind="CUSTOMER",
+            name="Updated Customer",
+            state_code="29",
+            city="Mysuru",
+        ),
+        user=user,
+        db=db,
+    )
+
+    assert updated_party["name"] == "Updated Customer"
+
+    # VIEWER must not update party.
+    user.role = "VIEWER"
+    db.commit()
+
+    try:
+        update_party(
+            party_id,
+            schemas.PartyIn(
+                kind="CUSTOMER",
+                name="Viewer Customer",
+                state_code="29",
+                city="Chennai",
+            ),
+            user=user,
+            db=db,
+        )
+        assert False, "VIEWER must not update parties"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Insufficient permissions"
+
+    db.expire_all()
+    party_row = db.get(models.Party, party_id)
+    assert party_row.name == "Updated Customer"
+    assert party_row.city == "Mysuru"
+
+    # ACCOUNTANT may update item.
+    user.role = "ACCOUNTANT"
+    db.commit()
+
+    item = create_item(
+        schemas.ItemIn(
+            kind="SERVICE",
+            description="Original Service",
+            hsn_sac="9983",
+            unit="NOS",
+            rate=1000,
+        ),
+        user=user,
+        db=db,
+    )
+
+    item_id = item["id"]
+
+    updated_item = update_item(
+        item_id,
+        schemas.ItemIn(
+            kind="SERVICE",
+            description="Updated Service",
+            hsn_sac="9983",
+            unit="NOS",
+            rate=1500,
+        ),
+        user=user,
+        db=db,
+    )
+
+    assert updated_item["description"] == "Updated Service"
+    assert updated_item["rate"] == 1500
+
+    # VIEWER must not update item.
+    user.role = "VIEWER"
+    db.commit()
+
+    try:
+        update_item(
+            item_id,
+            schemas.ItemIn(
+                kind="SERVICE",
+                description="Viewer Service",
+                hsn_sac="9983",
+                unit="NOS",
+                rate=500,
+            ),
+            user=user,
+            db=db,
+        )
+        assert False, "VIEWER must not update items"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Insufficient permissions"
+
+    db.expire_all()
+    item_row = db.get(models.Item, item_id)
+    assert item_row.description == "Updated Service"
+    assert item_row.rate == 1500
+
 def test_locked_create_rejects():
     db = _session()
     user, gstin, party = _setup(db)
