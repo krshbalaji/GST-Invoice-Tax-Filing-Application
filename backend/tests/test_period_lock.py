@@ -579,3 +579,31 @@ def test_gstin_creation_role_boundary():
     except HTTPException as exc:
         assert exc.status_code == 403
         assert exc.detail == "Insufficient permissions"
+
+def test_company_update_role_boundary():
+    db = _session()
+    user, _, _ = _setup(db)
+
+    from app.main import update_company
+    from app import schemas
+
+    body = schemas.CompanyIn(trade_name="Updated Trade")
+
+    user.role = "ACCOUNTANT"
+    db.commit()
+
+    result = update_company(body, user=user, db=db)
+    assert result["trade_name"] == "Updated Trade"
+    assert db.get(models.Company, user.company_id).trade_name == "Updated Trade"
+
+    user.role = "VIEWER"
+    db.commit()
+
+    try:
+        update_company(schemas.CompanyIn(trade_name="Viewer Trade"), user=user, db=db)
+        assert False, "VIEWER must not update company"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Insufficient permissions"
+
+    assert db.get(models.Company, user.company_id).trade_name == "Updated Trade"
