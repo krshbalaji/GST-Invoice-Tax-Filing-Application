@@ -263,6 +263,49 @@ def test_update_rejects_customer_from_another_company():
     assert inv.party_id == party.id
     assert inv.party_name == party.name
 
+def test_purchase_creation_role_boundary():
+    db = _session()
+    user, _, gstin = _setup(db)
+
+    from app.main import create_purchase
+
+    body = schemas.PurchaseIn(
+        gstin_id=gstin.id,
+        number="PUR-001",
+        invoice_date=date.today(),
+        vendor_name="Accountant Vendor",
+        taxable_value=1000,
+    )
+
+    user.role = "ACCOUNTANT"
+    db.commit()
+
+    result = create_purchase(body, user=user, db=db)
+    assert result["number"] == "PUR-001"
+
+    user.role = "VIEWER"
+    db.commit()
+
+    blocked = schemas.PurchaseIn(
+        gstin_id=gstin.id,
+        number="PUR-002",
+        invoice_date=date.today(),
+        vendor_name="Viewer Vendor",
+        taxable_value=500,
+    )
+
+    try:
+        create_purchase(blocked, user=user, db=db)
+        assert False, "VIEWER must not create purchases"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Insufficient permissions"
+
+    assert db.query(models.Purchase).filter(
+        models.Purchase.company_id == user.company_id,
+        models.Purchase.number == "PUR-002",
+    ).count() == 0
+
 def test_locked_create_rejects():
     db = _session()
     user, gstin, party = _setup(db)
