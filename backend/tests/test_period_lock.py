@@ -643,6 +643,65 @@ def test_gstin_of_rejects_gstin_from_another_company():
         assert exc.status_code == 404
         assert exc.detail == "GSTIN not found"
 
+def test_gstin_update_role_boundary():
+    db = _session()
+    user, gstin, _ = _setup(db)
+
+    from app.main import update_gstin
+
+    # ACCOUNTANT may update GSTIN.
+    user.role = "ACCOUNTANT"
+    db.commit()
+
+    updated = update_gstin(
+        gstin.id,
+        schemas.GstinIn(
+            gstin="29AABCA1234C1ZB",
+            legal_name="Updated Test Co",
+            trade_name="Updated Trade",
+            address1="2 Main",
+            city="Mysuru",
+            state_code="29",
+            pincode="570001",
+        ),
+        user=user,
+        db=db,
+    )
+
+    assert updated["legal_name"] == "Updated Test Co"
+    assert updated["trade_name"] == "Updated Trade"
+
+    # VIEWER must not update GSTIN.
+    user.role = "VIEWER"
+    db.commit()
+
+    try:
+        update_gstin(
+            gstin.id,
+            schemas.GstinIn(
+                gstin="29AABCA1234C1ZB",
+                legal_name="Viewer Change",
+                trade_name="Viewer Trade",
+                address1="3 Main",
+                city="Chennai",
+                state_code="29",
+                pincode="600001",
+            ),
+            user=user,
+            db=db,
+        )
+        assert False, "VIEWER must not update GSTIN"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Insufficient permissions"
+
+    db.expire_all()
+    row = db.get(models.Gstin, gstin.id)
+    assert row.legal_name == "Updated Test Co"
+    assert row.trade_name == "Updated Trade"
+    assert row.city == "Mysuru"
+    assert row.pincode == "570001"
+
 def test_user_out_does_not_expose_password_hash():
     db = _session()
     user, _, _ = _setup(db)
