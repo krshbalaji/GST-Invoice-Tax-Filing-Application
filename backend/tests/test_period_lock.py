@@ -307,6 +307,69 @@ def test_purchase_creation_role_boundary():
         models.Purchase.number == "PUR-002",
     ).count() == 0
 
+def test_irn_cancellation_role_boundary():
+    db = _session()
+    user, gstin, party = _setup(db)
+    inv_date = date(2026, 4, 10)
+
+    from app.main import cancel_irn, create_invoice
+
+    user.role = "ACCOUNTANT"
+    db.commit()
+
+    invoice = create_invoice(
+        _invoice_body(gstin.id, party.id, inv_date),
+        user=user,
+        db=db,
+    )
+    invoice_id = invoice["id"]
+
+    inv = db.get(models.Invoice, invoice_id)
+    inv.irn = "TEST-IRN-001"
+    inv.ack_no = "ACK-001"
+    inv.irn_date = datetime.utcnow()
+    inv.signed_qr = "SIGNED-QR"
+    db.commit()
+
+    result = cancel_irn(
+        invoice_id,
+        user=user,
+        db=db,
+    )
+
+    assert result["ok"] is True
+
+    db.expire_all()
+    inv = db.get(models.Invoice, invoice_id)
+
+    assert inv.irn == ""
+    assert inv.ack_no == ""
+    assert inv.irn_date is None
+    assert inv.signed_qr == ""
+    assert inv.cancel_reason == "IRN cancelled in sandbox"
+
+    user.role = "VIEWER"
+    db.commit()
+
+    inv.irn = "TEST-IRN-002"
+    inv.ack_no = "ACK-002"
+    inv.irn_date = datetime.utcnow()
+    inv.signed_qr = "SIGNED-QR-2"
+    db.commit()
+
+    try:
+        cancel_irn(invoice_id, user=user, db=db)
+        assert False, "VIEWER must not cancel IRNs"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Insufficient permissions"
+
+    db.expire_all()
+    inv = db.get(models.Invoice, invoice_id)
+
+    assert inv.irn == "TEST-IRN-002"
+    assert inv.ack_no == "ACK-002"
+
 def test_invoice_mutation_role_boundaries():
     db = _session()
     user, gstin, party = _setup(db)
