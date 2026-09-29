@@ -1119,6 +1119,71 @@ def test_party_creation_role_boundary():
         models.Party.name == "Viewer Customer",
     ).count() == 0
 
+def test_gstr2b_role_boundary():
+    db = _session()
+    user, gstin, _ = _setup(db)
+
+    body = schemas.Gstr2bIn(
+        gstin_id=gstin.id,
+        period="082026",
+        vendor_gstin="27AABCN9988D1Z5",
+        vendor_name="Vendor Pvt Ltd",
+        invoice_number="V-1001",
+        taxable_value=10000,
+        cgst=900,
+        sgst=900,
+        igst=0,
+        total=11800,
+    )
+
+    from app.main import add_gstr2b
+
+    # ACCOUNTANT can add GSTR2B data.
+    user.role = "ACCOUNTANT"
+    db.commit()
+
+    result = add_gstr2b(body, user=user, db=db)
+
+    assert result["id"]
+
+    created = db.query(models.Gstr2bRow).filter(
+        models.Gstr2bRow.id == result["id"]
+    ).one()
+
+    assert created.company_id == user.company_id
+    assert created.gstin_id == gstin.id
+    assert created.period == "082026"
+    assert created.vendor_gstin == "27AABCN9988D1Z5"
+    assert created.invoice_number == "V-1001"
+
+    # VIEWER cannot add another GSTR2B row.
+    user.role = "VIEWER"
+    db.commit()
+
+    blocked_body = schemas.Gstr2bIn(
+        gstin_id=gstin.id,
+        period="082026",
+        vendor_gstin="27AABCN9988D1Z5",
+        vendor_name="Blocked Vendor",
+        invoice_number="V-1002",
+        taxable_value=5000,
+        cgst=450,
+        sgst=450,
+        igst=0,
+        total=5900,
+    )
+
+    try:
+        add_gstr2b(blocked_body, user=user, db=db)
+        assert False, "VIEWER must not add GSTR2B data"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Insufficient permissions"
+
+    assert db.query(models.Gstr2bRow).filter(
+        models.Gstr2bRow.invoice_number == "V-1002"
+    ).count() == 0
+
 def test_item_creation_role_boundary():
     db = _session()
     user, _, _ = _setup(db)
