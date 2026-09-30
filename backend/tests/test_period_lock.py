@@ -417,6 +417,32 @@ def test_irn_generation_role_boundary():
         assert exc.status_code == 403
         assert exc.detail == "Insufficient permissions"
 
+def test_invoice_creation_role_boundary():
+    db = _session()
+    user, gstin, party = _setup(db)
+
+    user.role = "VIEWER"
+    db.commit()
+
+    body = _invoice_body(
+        gstin.id,
+        party.id,
+        date(2026, 4, 10),
+    )
+
+    from app.main import create_invoice
+
+    try:
+        create_invoice(body, user=user, db=db)
+        assert False, "VIEWER must not create invoices"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "Insufficient permissions"
+
+    assert db.query(models.Invoice).filter(
+        models.Invoice.company_id == user.company_id
+    ).count() == 0
+
 def test_invoice_mutation_role_boundaries():
     db = _session()
     user, gstin, party = _setup(db)
